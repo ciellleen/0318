@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Arduino_FreeRTOS.h>
 #include <semphr.h>
+#include <NewPing.h>  // NewPing 라이브러리 추가
 
 #define IN1 11 
 #define IN2 10  
@@ -14,9 +15,15 @@
 #define SONIC_ECHO_CENTER 50
 #define SONIC_TRIG_RIGHT 46
 #define SONIC_ECHO_RIGHT 47
+#define MAX_DISTANCE 200  // 최대 측정 거리 (cm)
 #define LINE_DETECT_WHITE 1
 #define motor_speed_offset 25
 #define LINE_SENSOR_COUNT 5
+
+// NewPing 객체 생성
+NewPing sonarLeft(SONIC_TRIG_LEFT, SONIC_ECHO_LEFT, MAX_DISTANCE);
+NewPing sonarCenter(SONIC_TRIG_CENTER, SONIC_ECHO_CENTER, MAX_DISTANCE);
+NewPing sonarRight(SONIC_TRIG_RIGHT, SONIC_ECHO_RIGHT, MAX_DISTANCE);
 
 int linesensor_pin[LINE_SENSOR_COUNT] = {32, 33, 31, 30, 29};
 volatile int linesensor_data[LINE_SENSOR_COUNT] = {0, 0, 0, 0, 0};
@@ -41,7 +48,6 @@ void read_sonar_sensor(void *pvParameters);
 void read_line_sensor(void *pvParameters);
 int read_digital_line_sensor(void);
 void line_following(int line_type);
-unsigned long get_distance(int trig_pin, int echo_pin);
 
 void setup() {
     Serial.begin(9600);
@@ -53,16 +59,8 @@ void setup() {
     pinMode(ENL, OUTPUT);
     pinMode(ENR, OUTPUT);
     
-    pinMode(SONIC_TRIG_LEFT, OUTPUT);
-    pinMode(SONIC_ECHO_LEFT, INPUT);
-    pinMode(SONIC_TRIG_CENTER, OUTPUT);
-    pinMode(SONIC_ECHO_CENTER, INPUT);
-    pinMode(SONIC_TRIG_RIGHT, OUTPUT);
-    pinMode(SONIC_ECHO_RIGHT, INPUT);
-    
-    digitalWrite(SONIC_TRIG_LEFT, LOW);
-    digitalWrite(SONIC_TRIG_CENTER, LOW);
-    digitalWrite(SONIC_TRIG_RIGHT, LOW);
+    // NewPing 라이브러리 사용으로 인해 초음파 센서 핀 설정이 필요하지 않음
+    // 라이브러리가 핀 설정을 내부적으로 처리함
     
     for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
         pinMode(linesensor_pin[i], INPUT);
@@ -102,22 +100,7 @@ void setup() {
 }
 
 void loop() {
-}
-
-unsigned long get_distance(int trig_pin, int echo_pin) {
-    delayMicroseconds(2);
-    
-    digitalWrite(trig_pin, HIGH);
-    delayMicroseconds(10);
-    digitalWrite(trig_pin, LOW);
-    
-    unsigned long duration = pulseIn(echo_pin, HIGH, 30000);
-    
-    if (duration == 0) {
-        return 9999;
-    } else {
-        return duration / 58;
-    }
+    // FreeRTOS를 사용하므로 빈 loop 함수
 }
 
 int read_digital_line_sensor(void) {
@@ -225,9 +208,15 @@ void read_sonar_sensor(void *pvParameters) {
     Serial.println("Sonar Sensor Task Started");
     
     for (;;) {
-        unsigned long left = get_distance(SONIC_TRIG_LEFT, SONIC_ECHO_LEFT);
-        unsigned long center = get_distance(SONIC_TRIG_CENTER, SONIC_ECHO_CENTER);
-        unsigned long right = get_distance(SONIC_TRIG_RIGHT, SONIC_ECHO_RIGHT);
+        // NewPing 라이브러리를 사용하여 거리 측정
+        unsigned long left = sonarLeft.ping_cm();
+        unsigned long center = sonarCenter.ping_cm();
+        unsigned long right = sonarRight.ping_cm();
+        
+        // 0이 반환된 경우 (감지 실패 또는 범위 초과) 최대값으로 설정
+        if (left == 0) left = MAX_DISTANCE;
+        if (center == 0) center = MAX_DISTANCE;
+        if (right == 0) right = MAX_DISTANCE;
         
         if (xSemaphoreTake(xDistanceMutex, portMAX_DELAY) == pdTRUE) {
             distance_left = left;
@@ -237,15 +226,15 @@ void read_sonar_sensor(void *pvParameters) {
             xSemaphoreGive(xDistanceMutex);
         }
         
-        Serial.print("Left: ");
+        Serial.print("\n[SONAR] Left: ");
         Serial.print(left);
-        Serial.print(" cm, Center: ");
+        Serial.print(" cm | Center: ");
         Serial.print(center);
-        Serial.print(" cm, Right: ");
+        Serial.print(" cm | Right: ");
         Serial.print(right);
         Serial.println(" cm");
         
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
