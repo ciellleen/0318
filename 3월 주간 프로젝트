@@ -329,8 +329,6 @@ void line_following(int line_type)
 
 void read_line_sensor(void *pvParameters) 
 {
-    send_debug_message("Line Sensor Task Started");
-    
     for (;;) 
     {
         digitalWrite(DEBUG_PIN_LINE, HIGH); 
@@ -354,8 +352,6 @@ void read_line_sensor(void *pvParameters)
 
 void read_sonar_sensor(void *pvParameters) 
 {
-    send_debug_message("Sonar Sensor Task Started");
-    
     for (;;) 
     {
         digitalWrite(DEBUG_PIN_SONAR, HIGH);
@@ -423,9 +419,7 @@ void robot_control(int left_motor_speed, int right_motor_speed)
 }
 
 void control_motor(void *pvParameters) 
-{
-    send_debug_message("Motor Control Task Started");
-    
+{    
     for (;;) 
     {
         digitalWrite(DEBUG_PIN_MOTOR, HIGH);
