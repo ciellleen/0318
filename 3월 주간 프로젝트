@@ -48,7 +48,6 @@ volatile unsigned long distance_right = 0;
 #define MSG_TYPE_MOTOR 3
 #define MSG_TYPE_DEBUG 4
 
-// 시리얼 메시지 구조체 정의
 typedef struct {
     uint8_t type;
     char message[64];
@@ -56,7 +55,6 @@ typedef struct {
     int valueCount;
 } SerialMessage_t;
 
-// 시리얼 메시지 큐 정의
 #define SERIAL_QUEUE_SIZE 10
 QueueHandle_t xSerialQueue;
 TaskHandle_t serial_task_handle;
@@ -74,8 +72,6 @@ void line_following(int line_type);
 
 
 
-
-// 시리얼 메시지 전송 함수
 void send_serial_message(uint8_t type, const char* message, int* values, int valueCount) {
     SerialMessage_t newMessage;
     newMessage.type = type;
@@ -87,11 +83,9 @@ void send_serial_message(uint8_t type, const char* message, int* values, int val
         newMessage.values[i] = values[i];
     }
     
-    // 큐에 메시지 전송
     xQueueSend(xSerialQueue, &newMessage, 0);
 }
 
-// 라인 센서 데이터 출력용 함수
 void send_line_sensor_data(int* sensorData, int count, int lineType) {
     send_serial_message(MSG_TYPE_LINE_SENSOR, "Line sensor data", sensorData, count);
     
@@ -99,18 +93,15 @@ void send_line_sensor_data(int* sensorData, int count, int lineType) {
     send_serial_message(MSG_TYPE_LINE_SENSOR, "Line type", lineTypeArray, 1);
 }
 
-// 소나 센서 데이터 출력용 함수
 void send_sonar_data(int left, int center, int right) {
     int sonarData[3] = {left, center, right};
     send_serial_message(MSG_TYPE_SONAR, "Sonar data", sonarData, 3);
 }
 
-// 디버그 메시지 출력용 함수
 void send_debug_message(const char* message) {
     send_serial_message(MSG_TYPE_DEBUG, message, NULL, 0);
 }
 
-// 모터 상태 출력용 함수
 void send_motor_state(const char* state) {
     send_serial_message(MSG_TYPE_MOTOR, state, NULL, 0);
 }
@@ -119,17 +110,14 @@ void send_motor_state(const char* state) {
 
 
 
-// 시리얼 태스크 구현
 void serial_task(void *pvParameters) {
     SerialMessage_t receivedMessage;
     
     send_debug_message("Serial Task Started");
     
     for(;;) {
-        // 큐에서 메시지 수신
         if(xQueueReceive(xSerialQueue, &receivedMessage, pdMS_TO_TICKS(100)) == pdPASS) {
-            // 시리얼 뮤텍스 획득
-            if(xSemaphoreTake(xSerialMutex, portMAX_DELAY) == pdTRUE) {
+              if(xSemaphoreTake(xSerialMutex, portMAX_DELAY) == pdTRUE) {
                 switch(receivedMessage.type) {
                     case MSG_TYPE_LINE_SENSOR:
                         if(strcmp(receivedMessage.message, "Line sensor data") == 0) {
@@ -164,13 +152,11 @@ void serial_task(void *pvParameters) {
                         break;
                 }
                 
-                // 뮤텍스 해제
                 xSemaphoreGive(xSerialMutex);
             }
         }
         digitalWrite(DEBUG_PIN_LINE, LOW); 
 
-        // 다른 태스크에게 CPU 시간 양보
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
