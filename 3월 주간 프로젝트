@@ -343,7 +343,6 @@ void read_line_sensor(void *pvParameters)
             xSemaphoreGive(xLineSensorMutex);
         }
 
-        // 시리얼 태스크로 라인 센서 데이터 전송
         send_line_sensor_data(linesensor_data, LINE_SENSOR_COUNT, current_line_type);
 
         digitalWrite(DEBUG_PIN_LINE, LOW); 
@@ -377,7 +376,6 @@ void read_sonar_sensor(void *pvParameters)
             xSemaphoreGive(xDistanceMutex);
         }
         
-        // 시리얼 태스크로 소나 데이터 전송
         send_sonar_data(left, center, right);
         
         digitalWrite(DEBUG_PIN_SONAR, LOW);
