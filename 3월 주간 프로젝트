@@ -19,9 +19,9 @@
 #define motor_speed_offset 25
 #define LINE_SENSOR_COUNT 5
 
-#define DEBUG_PIN_SONAR 26   
-#define DEBUG_PIN_LINE 27  
-#define DEBUG_PIN_MOTOR 28  
+#define DEBUG_PIN_SONAR 25   
+#define DEBUG_PIN_LINE 26 
+#define DEBUG_PIN_MOTOR 27  
 
 NewPing sonarLeft(SONIC_TRIG_LEFT, SONIC_ECHO_LEFT, MAX_DISTANCE);
 NewPing sonarCenter(SONIC_TRIG_CENTER, SONIC_ECHO_CENTER, MAX_DISTANCE);
@@ -42,6 +42,26 @@ volatile unsigned long distance_left = 0;
 volatile unsigned long distance_center = 0;
 volatile unsigned long distance_right = 0;
 
+
+#define MSG_TYPE_LINE_SENSOR 1
+#define MSG_TYPE_SONAR 2
+#define MSG_TYPE_MOTOR 3
+#define MSG_TYPE_DEBUG 4
+
+// 시리얼 메시지 구조체 정의
+typedef struct {
+    uint8_t type;
+    char message[64];
+    int values[10];
+    int valueCount;
+} SerialMessage_t;
+
+// 시리얼 메시지 큐 정의
+#define SERIAL_QUEUE_SIZE 10
+QueueHandle_t xSerialQueue;
+TaskHandle_t serial_task_handle;
+SemaphoreHandle_t xSerialMutex;
+
 void motor_l(int speed);
 void motor_r(int speed);
 void robot_control(int left_motor_speed, int right_motor_speed);
@@ -50,6 +70,111 @@ void read_sonar_sensor(void *pvParameters);
 void read_line_sensor(void *pvParameters);
 int read_digital_line_sensor(void);
 void line_following(int line_type);
+
+
+
+
+
+// 시리얼 메시지 전송 함수
+void send_serial_message(uint8_t type, const char* message, int* values, int valueCount) {
+    SerialMessage_t newMessage;
+    newMessage.type = type;
+    strncpy(newMessage.message, message, 63);
+    newMessage.message[63] = '\0';
+    
+    newMessage.valueCount = valueCount > 10 ? 10 : valueCount;
+    for(int i = 0; i < newMessage.valueCount; i++) {
+        newMessage.values[i] = values[i];
+    }
+    
+    // 큐에 메시지 전송
+    xQueueSend(xSerialQueue, &newMessage, 0);
+}
+
+// 라인 센서 데이터 출력용 함수
+void send_line_sensor_data(int* sensorData, int count, int lineType) {
+    send_serial_message(MSG_TYPE_LINE_SENSOR, "Line sensor data", sensorData, count);
+    
+    int lineTypeArray[1] = {lineType};
+    send_serial_message(MSG_TYPE_LINE_SENSOR, "Line type", lineTypeArray, 1);
+}
+
+// 소나 센서 데이터 출력용 함수
+void send_sonar_data(int left, int center, int right) {
+    int sonarData[3] = {left, center, right};
+    send_serial_message(MSG_TYPE_SONAR, "Sonar data", sonarData, 3);
+}
+
+// 디버그 메시지 출력용 함수
+void send_debug_message(const char* message) {
+    send_serial_message(MSG_TYPE_DEBUG, message, NULL, 0);
+}
+
+// 모터 상태 출력용 함수
+void send_motor_state(const char* state) {
+    send_serial_message(MSG_TYPE_MOTOR, state, NULL, 0);
+}
+
+
+
+
+
+// 시리얼 태스크 구현
+void serial_task(void *pvParameters) {
+    SerialMessage_t receivedMessage;
+    
+    send_debug_message("Serial Task Started");
+    
+    for(;;) {
+        // 큐에서 메시지 수신
+        if(xQueueReceive(xSerialQueue, &receivedMessage, pdMS_TO_TICKS(100)) == pdPASS) {
+            // 시리얼 뮤텍스 획득
+            if(xSemaphoreTake(xSerialMutex, portMAX_DELAY) == pdTRUE) {
+                switch(receivedMessage.type) {
+                    case MSG_TYPE_LINE_SENSOR:
+                        if(strcmp(receivedMessage.message, "Line sensor data") == 0) {
+                            Serial.print("Line sensor data = ");
+                            for(int i = 0; i < receivedMessage.valueCount; i++) {
+                                Serial.print(receivedMessage.values[i]);
+                                Serial.print(" ");
+                            }
+                            Serial.println();
+                        } else if(strcmp(receivedMessage.message, "Line type") == 0) {
+                            Serial.print("Line type: ");
+                            Serial.println(receivedMessage.values[0]);
+                        }
+                        break;
+                        
+                    case MSG_TYPE_SONAR:
+                        Serial.print("\n[SONAR] Left: ");
+                        Serial.print(receivedMessage.values[0]);
+                        Serial.print(" cm | Center: ");
+                        Serial.print(receivedMessage.values[1]);
+                        Serial.print(" cm | Right: ");
+                        Serial.print(receivedMessage.values[2]);
+                        Serial.println(" cm");
+                        break;
+                        
+                    case MSG_TYPE_MOTOR:
+                        Serial.println(receivedMessage.message);
+                        break;
+                        
+                    case MSG_TYPE_DEBUG:
+                        Serial.println(receivedMessage.message);
+                        break;
+                }
+                
+                // 뮤텍스 해제
+                xSemaphoreGive(xSerialMutex);
+            }
+        }
+        digitalWrite(DEBUG_PIN_LINE, LOW); 
+
+        // 다른 태스크에게 CPU 시간 양보
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
 
 void setup() 
 {
@@ -77,6 +202,17 @@ void setup()
     
     xDistanceMutex = xSemaphoreCreateMutex();
     xLineSensorMutex = xSemaphoreCreateMutex();
+    xSerialMutex = xSemaphoreCreateMutex();
+    xSerialQueue = xQueueCreate(SERIAL_QUEUE_SIZE, sizeof(SerialMessage_t));
+
+    xTaskCreate(
+        serial_task,
+        "SerialTask",
+        256,
+        NULL,
+        1,
+        &serial_task_handle
+    );
     
     xTaskCreate(
         read_sonar_sensor,
@@ -207,7 +343,7 @@ void line_following(int line_type)
 
 void read_line_sensor(void *pvParameters) 
 {
-    Serial.println("Line Sensor Task Started");
+    send_debug_message("Line Sensor Task Started");
     
     for (;;) 
     {
@@ -221,17 +357,11 @@ void read_line_sensor(void *pvParameters)
             xSemaphoreGive(xLineSensorMutex);
         }
 
+        // 시리얼 태스크로 라인 센서 데이터 전송
+        send_line_sensor_data(linesensor_data, LINE_SENSOR_COUNT, current_line_type);
+
         digitalWrite(DEBUG_PIN_LINE, LOW); 
         
-       // Serial.print("Line sensor data = ");
-        /*for (int i = 0; i < LINE_SENSOR_COUNT; i++) 
-        {
-            Serial.print(linesensor_data[i]);
-            Serial.print(" ");
-        }
-        Serial.print("Line type: ");
-        Serial.println(current_line_type);
-*/
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
@@ -239,7 +369,7 @@ void read_line_sensor(void *pvParameters)
 
 void read_sonar_sensor(void *pvParameters) 
 {
-    Serial.println("Sonar Sensor Task Started");
+    send_debug_message("Sonar Sensor Task Started");
     
     for (;;) 
     {
@@ -261,13 +391,8 @@ void read_sonar_sensor(void *pvParameters)
             xSemaphoreGive(xDistanceMutex);
         }
         
-        Serial.print("\n[SONAR] Left: ");
-        Serial.print(left);
-        Serial.print(" cm | Center: ");
-        Serial.print(center);
-        Serial.print(" cm | Right: ");
-        Serial.print(right);
-        Serial.println(" cm");
+        // 시리얼 태스크로 소나 데이터 전송
+        send_sonar_data(left, center, right);
         
         digitalWrite(DEBUG_PIN_SONAR, LOW);
         
@@ -315,7 +440,7 @@ void robot_control(int left_motor_speed, int right_motor_speed)
 
 void control_motor(void *pvParameters) 
 {
-    Serial.println("Motor Control Task Started");
+    send_debug_message("Motor Control Task Started");
     
     for (;;) 
     {
@@ -341,7 +466,7 @@ void control_motor(void *pvParameters)
         if (center < 15) 
         {
             robot_control(0, 0);
-            Serial.println("Obstacle detected! Stopping...");
+            send_motor_state("Obstacle detected! Stopping...");
         } 
         else 
         {
